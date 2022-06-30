@@ -1,0 +1,42 @@
+{
+  "name": "areyoualive",
+  "version": "1.0.0",
+  "description": "Will check a specific URL and report status to a slack webhook",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "node .",
+    "lint": "eslint .",
+    "lintfix": "eslint --fix ."
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/VRabadan/areyoualive.git"
+  },
+  "keywords": [
+    "webhook",
+    "node",
+    "heartbeat"
+  ],
+  "author": "VRabadan",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/VRabadan/areyoualive/issues"
+  },
+  "homepage": "https://github.com/VRabadan/areyoualive#readme",
+  "dependencies": {
+    "axios": "^0.24.0",
+    "dotenv": "^16.0.1",
+    "slack-webhook": "^1.0.0"
+  },
+  "devDependencies": {
+    "eslint": "^8.11.0",
+    "eslint-config-airbnb-base": "^15.0.0",
+    "eslint-config-prettier": "^8.5.0",
+    "eslint-plugin-import": "^2.25.4",
+    "eslint-plugin-jest": "^26.1.1",
+    "eslint-plugin-prettier": "^4.0.0",
+    "jest": "^27.5.1",
+    "prettier": "^2.6.0"
+  }
+}
