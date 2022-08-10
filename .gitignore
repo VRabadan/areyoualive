@@ -74,6 +74,8 @@ typings/
 
 # local configuration files
 config.json
+environments.json
+meh.json
 
 # parcel-bundler cache (https://parceljs.org/)
 .cache
