@@ -1,10 +1,12 @@
 const axios = require('axios');
+const {setIntervalAsync} = require('set-interval-async/dynamic');
 const SlackWebhook = require('slack-webhook');
 const environments = require('./environments.json');
+const _ = require('lodash');
 require('dotenv').config();
 
-let current = [];
-let last = [];
+let current = {};
+let last = {};
 
 const slack = new SlackWebhook(process.env.SLACK_WEBHOOK_URL);
 
@@ -94,22 +96,24 @@ async function areYouAlive(token, url) {
   }
 }
 
-function formatMessage(key, value) {
+function formatMessage(key, value, env) {
+  current[env] ??= {};
   if (value[key].status >= 200 && value[key].status < 400) {
-    current.push('0');
+    current[env][key] = 0;
     return `:white_check_mark: ${value[key].message} Version ${value[key].version} \n`;
-  }
-    current.push('1');
+  } else {
+    current[env][key] = 1;
     return `:x: ${key} Error ${value[key].status}: ${value[key].message} Version ${value[key].version} \n`;
+  }
 }
 
-function statuslinter(value) {
+function statuslinter(value, env) {
   const keys = Object.keys(value);
   const message = keys.reduce((p, c) => {
     if (Object.keys(value[c]).length > 0) {
       const formatedMessage = value[c].status
-        ? formatMessage(c, value)
-        : statuslinter(value[c]);
+        ? formatMessage(c, value, env)
+        : statuslinter(value[c], env);
       p += formatedMessage;
       return p;
     }
@@ -123,7 +127,7 @@ function concatenateEnv(env, data, message) {
     type: 'section',
     text: {
       type: 'mrkdwn',
-      text: `*${env}*\n${statuslinter(data)}`,
+      text: `*${env}*\n${statuslinter(data, env)}`,
     },
   };
 
@@ -132,14 +136,14 @@ function concatenateEnv(env, data, message) {
 }
 
 async function main() {
-  const message = init;
+  var message = _.cloneDeep(init);
   for (const env in environments) {
     const token = await login(
       environments[env].mail,
       environments[env].secret,
       environments[env].url
     );
-    if (token.status) {
+    if (token.Login) {
       console.log(`${env} - Login Error`);
       concatenateEnv(env, token, message);
     } else {
@@ -152,23 +156,22 @@ async function main() {
           } else {
             delete data[app];
           }
-        }
+        }                                                                                                                                                                                                                                                                                   
       }
       concatenateEnv(env, data, message);
     }
   }
-  if (current !== last) {
-    last = current;
-    current = [];
+  if (!(_.isEqual(current, last))) {
+    last = _.cloneDeep(current);
     try {
-      slack.send(message);
+      //slack.send(message);
+      console.log(message);
     } catch (error) {
       console.log(error);
     }
   }
+  current = {};
 }
 
 // run main every five minutes
-main();
-setInterval(main, 300000);
-//main();
+setIntervalAsync(async () => { await main() }, 3000);
