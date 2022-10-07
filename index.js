@@ -6,8 +6,8 @@ const otp = require('otpauth');
 const _ = require('lodash');
 require('dotenv').config();
 
-let current = {};
-let last = {};
+let current_state = {};
+let last_state = {};
 
 const slack = new SlackWebhook(process.env.SLACK_WEBHOOK_URL);
 
@@ -56,7 +56,7 @@ async function login(user, pw, url, otpInfo) {
     console.log(error);
     if (error.code) {
       response = {
-        Login: {
+        LoginError: {
           message: error.message,
           status: error.code,
           version: 'N/A',
@@ -64,7 +64,7 @@ async function login(user, pw, url, otpInfo) {
       };
     } else {
       response = {
-        Login: {
+        LoginError: {
           message: error.response.statusText,
           status: error.response.status,
           version: 'N/A',
@@ -80,7 +80,7 @@ async function areYouAlive(token, url) {
     method: 'GET',
     url: `${url}/api/heartbeat/all`,
     headers: {
-      Authorization: `Bearer ${token.accessToken}`,
+      Authorization: `Bearer ${token}`,
     },
   };
   let response;
@@ -91,7 +91,7 @@ async function areYouAlive(token, url) {
     console.log(error);
     if (error.code) {
       response = {
-        Heartbeat: {
+        HeartbeatError: {
           message: error.message,
           status: error.code,
           version: 'N/A',
@@ -99,7 +99,7 @@ async function areYouAlive(token, url) {
       };
     } else {
       response = {
-        Heartbeat: {
+        HeartbeatError: {
           message: error.response.statusText,
           status: error.response.status,
           version: 'N/A',
@@ -110,84 +110,124 @@ async function areYouAlive(token, url) {
   }
 }
 
-function formatMessage(key, value, env) {
-  current[env] ??= {};
-  if (value[key].status >= 200 && value[key].status < 400) {
-    current[env][key] = 0;
-    return `:white_check_mark: ${value[key].message} Version ${value[key].version} \n`;
+function createSlackMessageChunk(serviceName, heartbeat) {
+  let msg;
+  if (heartbeat.status >= 200 && heartbeat.status < 400) {
+    msg = `:white_check_mark: ${heartbeat.message} Version ${heartbeat.version} \n`;
   } else {
-    current[env][key] = 1;
-    return `:x: ${key} Error ${value[key].status}: ${value[key].message} Version ${value[key].version} \n`;
+    msg = `:x: ${serviceName} Error ${heartbeat.status}: ${heartbeat.message} Version ${heartbeat.version} \n`;
   }
-}
 
-function statuslinter(value, env) {
-  const keys = Object.keys(value);
-  const message = keys.reduce((p, c) => {
-    if (Object.keys(value[c]).length > 0) {
-      const formatedMessage = value[c].status
-        ? formatMessage(c, value, env)
-        : statuslinter(value[c], env);
-      p += formatedMessage;
-      return p;
-    }
-    return p;
-  }, '');
-  return message;
-}
-
-function concatenateEnv(env, data, message) {
-  const newenv = {
+  return {
     type: 'section',
     text: {
       type: 'mrkdwn',
-      text: `*${env}*\n${statuslinter(data, env)}`,
+      text: msg,
     },
   };
+}
 
-  message.blocks.push(newenv);
-  return message;
+// This function can receive a JSON object with a nested structure of heartbeats
+// and will return a flattened object with that same data.
+// Example:
+//
+// {
+//   Backend: { status: 200, version: "1.2.3", message: "foo bar" },
+//   ComplexService: {
+//     Foo: { status: 200, version: "1.2.3", message: "foo bar" },
+//     Bar: { status: 200, version: "1.2.3", message: "foo bar" }
+//   }
+// }
+//
+// will be converted to:
+//
+// {
+//   Backend: { status: 200, version: "1.2.3", message: "foo bar" },
+//   Foo: { status: 200, version: "1.2.3", message: "foo bar" },
+//   Bar: { status: 200, version: "1.2.3", message: "foo bar" }
+// }
+
+function flattenHeartbeatPayload(payload) {
+  let chunks = Object.entries(payload).map(([key, value]) => {
+    // We decide whether the "value" contains a heartbeat object or a nested
+    // structure of heartbeats by checking if it contains a "status" key.
+    if (value.status) {
+      return [key, value];
+    } else {
+      return Object.entries(value);
+    }
+  });
+
+  // At this point we might have a nested arrays (this will happen if the
+  // payload container nested heartbeats). If so, we want to flatten them.
+  chunks = _.flattenDeep(chunks);
+
+  // At this point we'll have an array that will look like
+  // [<serviceName>, <serviceHeartbeat>, <serviceName>, <serviceHeartbeat>...]
+  // Iterate the array skipping 1 element at a time and pair the elements.
+  const transformedPayload = {};
+  for(let i = 0; i < chunks.length - 1; i = i + 2) {
+    transformedPayload[chunks[i]] = chunks[i + 1];
+  }
+
+  return transformedPayload;
 }
 
 async function main() {
-  var message = _.cloneDeep(init);
+  var slackPayload = _.cloneDeep(init);
   for (const env in environments) {
-    const token = await login(
+    const loginResponse = await login(
       environments[env].mail,
       environments[env].secret,
       environments[env].url,
       environments[env].otpInfo
     );
-    if (token.Login) {
+    if (loginResponse.LoginError) {
       console.log(`${env} - Login Error`);
-      concatenateEnv(env, token, message);
+
+      // TODO: Increment error count for this env+key combination
     } else {
-      const data = await areYouAlive(token, environments[env].url);
-      if (environments[env].skip) {
-        for (const app of environments[env].skip) {
-          const keys = app.split('.');
-          if (keys.length > 1) {
-            delete data[keys[0]][keys[1]];
-          } else {
-            delete data[app];
+      const envState = await areYouAlive(loginResponse.accessToken, environments[env].url);
+
+      // Check if the request failed
+      if (envState.HeartbeatError) {
+        // Something failed, but we can't be sure if it was a temporary failure
+        // or a permanent failure. Keep an eye on this...
+
+        // TODO: Increment error count for this env+key combination
+      } else {
+        // We got an actual heartbeat response
+
+        // First thing, we should parse the received data
+        const heartbeats = flattenHeartbeatPayload(envState);
+
+        // Now we want to generate a Slack Message Chunk so we can then append
+        // it to the actualy Slack Payload object that we're going to send to
+        // Slack's API.
+        Object.entries(heartbeats).map(([serviceName, heartbeat]) => {
+          if (environments[env].skip && environments[env].skip.includes(serviceName)) {
+            return;
           }
-        }
+
+          const msg = createSlackMessageChunk(serviceName, heartbeat);
+          slackPayload.blocks.push(msg);
+        });
       }
-      concatenateEnv(env, data, message);
     }
   }
-  if (!(_.isEqual(current, last))) {
-    last = _.cloneDeep(current);
+  if (!(_.isEqual(current_state, last_state))) {
+    last_state = _.cloneDeep(current_state);
     try {
-      slack.send(message);
-      console.log(message);
+      //slack.send(slackPayload);
+      console.log(slackPayload);
     } catch (error) {
       console.log(error);
     }
   }
-  current = {};
+  current_state = {};
+  console.log("vueltas!");
 }
 
 main();
 // run main every five minutes
-// setIntervalAsync(async () => { await main() }, 3000);
+setIntervalAsync(async () => { await main() }, 3000);
