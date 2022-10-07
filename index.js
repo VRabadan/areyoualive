@@ -2,6 +2,7 @@ const axios = require('axios');
 const {setIntervalAsync} = require('set-interval-async/dynamic');
 const SlackWebhook = require('slack-webhook');
 const environments = require('./environments.json');
+const otp = require('otpauth');
 const _ = require('lodash');
 require('dotenv').config();
 
@@ -25,13 +26,26 @@ const init = {
   ],
 };
 
-async function login(user, pw, url) {
+function generateToken(otpInfo) {
+  const totp = new otp.TOTP({
+    issuer: otpInfo.issuer,
+    label: otpInfo.label,
+    algorithm: 'SHA512',
+    digits: 6,
+    period: 30,
+    secret: otp.Secret.fromBase32(otpInfo.secret),
+  });
+  return totp.generate();
+}
+
+async function login(user, pw, url, otpInfo) {
   const request = {
     method: 'POST',
     url: `${url}/api/auth/user/login`,
     data: {
       email: user,
       password: pw,
+      token: generateToken(otpInfo),
     },
   };
   let response;
@@ -141,7 +155,8 @@ async function main() {
     const token = await login(
       environments[env].mail,
       environments[env].secret,
-      environments[env].url
+      environments[env].url,
+      environments[env].otpInfo
     );
     if (token.Login) {
       console.log(`${env} - Login Error`);
@@ -156,7 +171,7 @@ async function main() {
           } else {
             delete data[app];
           }
-        }                                                                                                                                                                                                                                                                                   
+        }
       }
       concatenateEnv(env, data, message);
     }
@@ -164,7 +179,7 @@ async function main() {
   if (!(_.isEqual(current, last))) {
     last = _.cloneDeep(current);
     try {
-      //slack.send(message);
+      slack.send(message);
       console.log(message);
     } catch (error) {
       console.log(error);
@@ -173,5 +188,6 @@ async function main() {
   current = {};
 }
 
+main();
 // run main every five minutes
-setIntervalAsync(async () => { await main() }, 3000);
+// setIntervalAsync(async () => { await main() }, 3000);
