@@ -1,0 +1,22 @@
+{
+   "Environment Name": {
+      "url": "https://someUrlyouwanttotest.com",
+      "mail": "user@domain.something",
+      "secret": "thisisasupersecretpassword",
+      "otpInfo": {
+         "label": "otplabel",
+         "issuer": "issuer",
+         "secret": "thisisalsoasupersecretsecretforotp"
+      }
+   },
+   "You can add many environments" : {
+      "url": "https://someUrlyouwanttotest.com",
+      "mail": "user@domain.something",
+      "secret": "thisisasupersecretpassword",
+      "otpInfo": {
+         "label": "otplabel",
+         "issuer": "issuer",
+         "secret": "thisisalsoasupersecretsecretforotp"
+      }
+   }
+}
